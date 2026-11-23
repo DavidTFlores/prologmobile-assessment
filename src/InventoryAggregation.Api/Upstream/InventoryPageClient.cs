@@ -83,6 +83,13 @@ public sealed class InventoryPageClient(
 
             if (!response.IsSuccessStatusCode)
             {
+                // The API explains its errors in the body ("Rate limit of 5 requests per 10 seconds
+                // exceeded."). That goes to the log, where it is the fastest route to a diagnosis; the
+                // decision about what to do next is made from the status code alone.
+                logger.LogInformation(
+                    "Inventory API answered page {Page} with {StatusCode}: {UpstreamMessage}",
+                    request.Page, (int)response.StatusCode, await ReadErrorSnippetAsync(response, linked.Token));
+
                 return ClassifyErrorStatus(response);
             }
 
@@ -143,6 +150,15 @@ public sealed class InventoryPageClient(
             // unchanged would only add load, so fail now and say why.
             _ => Permanent($"the API responded {status}, which retrying the same request will not fix"),
         };
+    }
+
+    /// <summary>The start of an error body, capped so that an unexpectedly large one cannot flood the log.</summary>
+    private static async Task<string> ReadErrorSnippetAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        var buffer = new char[300];
+        using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(cancellationToken));
+        var length = await reader.ReadBlockAsync(buffer, cancellationToken);
+        return new string(buffer, 0, length);
     }
 
     /// <summary>Retry-After can be a number of seconds or an HTTP date. Either becomes a wait from now.</summary>

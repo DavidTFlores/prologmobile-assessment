@@ -5,8 +5,8 @@ namespace InventoryAggregation.Api.Upstream;
 
 /// <summary>
 /// Walks the paginated API and returns the whole dataset or nothing. The page client vouches for each
-/// page on its own; this class is responsible for what only shows up across pages: that the pages add
-/// up to the total the API claims, and that no record was delivered twice.
+/// page on its own; this class is responsible for what only shows up across pages: records the API
+/// delivers more than once, and whether the distinct records add up to the total the API claims.
 /// </summary>
 public sealed class PaginatedInventorySource(
     IInventoryPageClient pages,
@@ -41,7 +41,8 @@ public sealed class PaginatedInventorySource(
     private async Task<FetchResult<IReadOnlyList<InventoryRecord>>> CollectAsync(CancellationToken cancellationToken)
     {
         var records = new List<InventoryRecord>();
-        var pageSeenOn = new Dictionary<int, int>();
+        var firstSeen = new Dictionary<int, (InventoryRecord Record, int Page)>();
+        var repeatedRows = 0;
         int? totalRecords = null;
         var totalPages = 1;
 
@@ -61,6 +62,9 @@ public sealed class PaginatedInventorySource(
             }
 
             var page = result.Value;
+            logger.LogInformation(
+                "Page {Page} of {TotalPages}: {RowCount} row(s)", pageNumber, page.TotalPages, page.Records.Count);
+
             if (pageNumber == 1)
             {
                 // The first page fixes the size of the run. Because the dataset is static, every later
@@ -71,27 +75,40 @@ public sealed class PaginatedInventorySource(
 
             foreach (var record in page.Records)
             {
-                if (!pageSeenOn.TryAdd(record.Id, pageNumber))
+                if (firstSeen.TryAdd(record.Id, (record, pageNumber)))
                 {
-                    // Ids are unique, so a repeat means the pages overlap, and an overlap means some
-                    // other record was pushed out. Dropping the duplicate would hide that it is missing.
-                    return Inconsistent(
-                        $"record {record.Id} was returned on both page {pageSeenOn[record.Id]} and page {pageNumber}");
+                    records.Add(record);
+                    continue;
                 }
 
-                records.Add(record);
+                // The id is documented as unique, so this row is a second delivery of a record we
+                // already hold. The real API does this on every even page. An identical copy is
+                // dropped: counting it would double that record's stock value.
+                var (original, originalPage) = firstSeen[record.Id];
+                if (record != original)
+                {
+                    // Two different versions of one record. There is no basis for choosing between
+                    // them, and either choice changes a money total, so this is an error.
+                    return Inconsistent(
+                        $"record {record.Id} was returned with different contents on page {originalPage} and page {pageNumber}");
+                }
+
+                repeatedRows++;
             }
         }
 
-        // Follows from the per-page checks, but it is the property the whole design exists to
-        // guarantee, so it is asserted directly instead of being left as an inference.
+        // The completeness check. Counting rows would not do, because rows include the repeats above:
+        // the claim being verified is that we hold as many distinct records as the API says exist. If
+        // a repeat had displaced a real record anywhere, this is where it shows.
         if (records.Count != totalRecords)
         {
-            return Inconsistent($"the API reports {totalRecords} records but {records.Count} were collected");
+            return Inconsistent(
+                $"the API reports {totalRecords} records but {records.Count} distinct records were returned");
         }
 
         logger.LogInformation(
-            "Retrieved {RecordCount} records from {PageCount} page(s)", records.Count, totalPages);
+            "Retrieved {RecordCount} distinct records from {PageCount} page(s); dropped {RepeatedRows} repeated row(s)",
+            records.Count, totalPages, repeatedRows);
 
         return FetchResult<IReadOnlyList<InventoryRecord>>.Success(records);
     }

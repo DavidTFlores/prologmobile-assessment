@@ -38,8 +38,11 @@ public sealed class InventoryApiOptions : IValidatableObject
 
     public TimeSpan MaxRetryDelay { get; set; } = TimeSpan.FromSeconds(5);
 
-    /// <summary>The longest server-requested Retry-After we will wait out. Beyond this we give up and say so.</summary>
-    public TimeSpan MaxRetryAfter { get; set; } = TimeSpan.FromSeconds(10);
+    /// <summary>
+    /// The longest server-requested Retry-After we will wait out. Beyond this we give up and say so.
+    /// The API's rate limit is 5 requests per 10 seconds and it asks for up to 10 s, so 30 s leaves room.
+    /// </summary>
+    public TimeSpan MaxRetryAfter { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>Upper bound on collecting the whole dataset, so a caller is never left hanging.</summary>
     public TimeSpan TotalTimeout { get; set; } = TimeSpan.FromSeconds(60);

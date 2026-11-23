@@ -133,8 +133,40 @@ public class InventoryAggregatorTests
         ]);
 
         var category = Assert.Single(summary.Categories);
-        Assert.Equal("Electronics", category.Category); // the lowest id's spelling, trimmed
+        Assert.Equal("Electronics", category.Category);
         Assert.Equal(3, category.AvailableRecordCount);
+    }
+
+    [Theory]
+    [InlineData("  home & kitchen ", "Home & Kitchen")]
+    [InlineData("OFFICE SUPPLIES", "Office Supplies")]
+    [InlineData("outdoor", "Outdoor")]
+    [InlineData("Toys ", "Toys")]
+    [InlineData("office   supplies", "Office Supplies")] // inner runs of whitespace collapse too
+    public void Reports_every_spelling_of_a_category_under_one_title_case_name(string spelling, string expected)
+    {
+        // These spellings are taken from the real dataset, which has 24 of them for 6 categories.
+        var summary = _aggregator.Aggregate([Record(1, category: spelling)]);
+
+        Assert.Equal(expected, Assert.Single(summary.Categories).Category);
+    }
+
+    [Fact]
+    public void Merges_the_real_datasets_mixed_spellings_into_single_categories()
+    {
+        var summary = _aggregator.Aggregate(
+        [
+            Record(1, category: "Home & Kitchen", price: 10m, quantity: 1),
+            Record(2, category: "  home & kitchen ", price: 10m, quantity: 2),
+            Record(3, category: " Home & Kitchen", price: 10m, quantity: 3),
+            Record(4, category: "OFFICE SUPPLIES", price: 5m, quantity: 1),
+            Record(5, category: "Office Supplies ", price: 5m, quantity: 1),
+        ]);
+
+        Assert.Equal(["Home & Kitchen", "Office Supplies"], summary.Categories.Select(c => c.Category));
+        Assert.Equal(60m, summary.Categories[0].TotalInventoryValue);
+        Assert.Equal(3, summary.Categories[0].AvailableRecordCount);
+        Assert.Equal(10m, summary.Categories[1].TotalInventoryValue);
     }
 
     [Fact]

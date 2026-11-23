@@ -8,7 +8,7 @@ public static class RetryBackoff
 {
     /// <param name="failedAttempt">The attempt that just failed, starting at 1.</param>
     /// <param name="jitter">A random sample in [0, 1).</param>
-    /// <param name="retryAfter">The wait the server asked for, if it sent a Retry-After header.</param>
+    /// <param name="retryAfter">The wait the server asked for, if it sent a Retry-After header. The backoff is added to it.</param>
     public static TimeSpan Delay(
         int failedAttempt,
         TimeSpan baseDelay,
@@ -24,7 +24,9 @@ public static class RetryBackoff
         // the same instant and knock the upstream over again.
         var backoff = capped * (0.5 + jitter / 2);
 
-        // A server-supplied Retry-After is a floor: we may wait longer than asked, never less.
-        return retryAfter > backoff ? retryAfter.Value : backoff;
+        // A server-supplied Retry-After is added to, never shortened. The header is in whole seconds, so
+        // waiting exactly that long risks arriving a fraction early and being refused again; and when
+        // a rate-limit window reopens, the jitter keeps everyone who was waiting from arriving at once.
+        return retryAfter is { } serverWait ? serverWait + backoff : backoff;
     }
 }

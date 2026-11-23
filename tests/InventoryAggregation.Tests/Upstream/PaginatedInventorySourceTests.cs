@@ -81,9 +81,29 @@ public class PaginatedInventorySourceTests
     }
 
     [Fact]
-    public async Task Fails_when_the_same_record_is_delivered_on_two_pages()
+    public async Task Keeps_one_copy_of_a_record_the_api_repeats_at_the_top_of_the_next_page()
     {
-        // Page 2 starts one record early: record 25 arrives twice and record 50 is pushed off the end.
+        // The real API's behaviour: every even page starts with the previous page's last record, so
+        // 60 records arrive as 61 rows (25, then 26 starting again at record 25, then 10).
+        var dataset = Sequence(60);
+        var pages = new FakePageClient(request => request.Page switch
+        {
+            1 => Page(dataset.Take(25), 1, totalPages: 3, totalRecords: 60),
+            2 => Page(dataset.Skip(24).Take(26), 2, totalPages: 3, totalRecords: 60),
+            _ => Page(dataset.Skip(50), 3, totalPages: 3, totalRecords: 60),
+        });
+
+        var result = await CreateSource(pages).GetAllRecordsAsync(CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(dataset, result.Value); // each record once, in the order first seen
+    }
+
+    [Fact]
+    public async Task Fails_when_a_repeated_record_has_taken_the_place_of_a_real_one()
+    {
+        // Page 2 starts one record early but is not one row longer: record 25 arrives twice and
+        // record 50 never arrives. The rows still add up to 50; the distinct records do not.
         var dataset = Sequence(50);
         var pages = new FakePageClient(request => request.Page == 1
             ? Page(dataset.Take(25), 1, totalPages: 2, totalRecords: 50)
@@ -93,11 +113,27 @@ public class PaginatedInventorySourceTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal(FetchFailureKind.InvalidData, result.Failure.Kind);
-        Assert.Contains("record 25 was returned on both page 1 and page 2", result.Failure.Detail);
+        Assert.Contains("the API reports 50 records but 49 distinct records were returned", result.Failure.Detail);
     }
 
     [Fact]
-    public async Task Fails_when_fewer_records_were_collected_than_the_api_reports()
+    public async Task Fails_when_the_same_id_arrives_with_different_contents()
+    {
+        var dataset = Sequence(30);
+        var conflictingCopy = dataset[24] with { Quantity = dataset[24].Quantity + 5 };
+        var pages = new FakePageClient(request => request.Page == 1
+            ? Page(dataset.Take(25), 1, totalPages: 2, totalRecords: 30)
+            : Page(dataset.Skip(25).Prepend(conflictingCopy), 2, totalPages: 2, totalRecords: 30));
+
+        var result = await CreateSource(pages).GetAllRecordsAsync(CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(FetchFailureKind.InvalidData, result.Failure.Kind);
+        Assert.Contains("record 25 was returned with different contents on page 1 and page 2", result.Failure.Detail);
+    }
+
+    [Fact]
+    public async Task Fails_when_fewer_distinct_records_arrive_than_the_api_reports()
     {
         var pages = new FakePageClient(_ => Page(Sequence(20), 1, totalPages: 1, totalRecords: 25));
 
@@ -105,7 +141,7 @@ public class PaginatedInventorySourceTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal(FetchFailureKind.InvalidData, result.Failure.Kind);
-        Assert.Contains("the API reports 25 records but 20 were collected", result.Failure.Detail);
+        Assert.Contains("the API reports 25 records but 20 distinct records were returned", result.Failure.Detail);
     }
 
     [Fact]

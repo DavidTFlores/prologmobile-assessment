@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace InventoryAggregation.Api.Inventory;
 
 /// <summary>
@@ -8,17 +10,17 @@ public sealed class InventoryAggregator
 {
     public InventorySummary Aggregate(IReadOnlyCollection<InventoryRecord> records)
     {
-        // Sorting by id up front makes everything downstream deterministic: items come out in id order,
-        // and when one category is spelled two ways, the lowest id's spelling is the one reported.
+        // Sorting by id up front makes the output deterministic: items come out in id order whatever
+        // order the records arrived in.
         var available = records
             .Where(IsAvailable)
             .OrderBy(record => record.Id)
             .ToList();
 
         var categories = available
-            .GroupBy(record => record.Category.Trim(), StringComparer.OrdinalIgnoreCase)
+            .GroupBy(record => CategoryName(record.Category))
             .Select(Summarise)
-            .OrderBy(category => category.Category, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(category => category.Category, StringComparer.Ordinal)
             .ToList();
 
         return new InventorySummary(
@@ -34,6 +36,20 @@ public sealed class InventoryAggregator
     /// not available stock either, so the same rule covers it.
     /// </summary>
     private static bool IsAvailable(InventoryRecord record) => record.Quantity > 0;
+
+    /// <summary>
+    /// The one name a category is grouped and reported under. The real data spells its six categories
+    /// twenty-four ways ("Home &amp; Kitchen", "  home &amp; kitchen ", "OFFICE SUPPLIES", "outdoor"), and no
+    /// single casing dominates, so there is no existing spelling to prefer. Whitespace is trimmed and
+    /// collapsed, case is ignored, and the result is written in Title Case, the style of the brief's
+    /// own example. The cost is that an acronym would be flattened ("TV" becomes "Tv").
+    /// </summary>
+    private static string CategoryName(string raw)
+    {
+        var words = raw.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        var lowered = string.Join(' ', words).ToLowerInvariant();
+        return CultureInfo.InvariantCulture.TextInfo.ToTitleCase(lowered);
+    }
 
     private static CategorySummary Summarise(IGrouping<string, InventoryRecord> group)
     {

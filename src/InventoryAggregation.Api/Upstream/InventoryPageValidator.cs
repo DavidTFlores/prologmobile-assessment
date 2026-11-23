@@ -52,27 +52,24 @@ internal static class InventoryPageValidator
                 $"totalPages is {totalPages} but {totalRecords} records at {pageSize} per page makes {expectedPages}");
         }
 
-        // Full pages everywhere except the last, which holds the remainder. This is what catches a
-        // truncated page: without it a short 200 would quietly shrink the dataset.
-        var expectedCount = (int)Math.Clamp(totalRecords - ((long)page - 1) * pageSize, 0, pageSize);
-        if (records.Count != expectedCount)
+        // A page must carry at least the records its position implies: a full page everywhere except
+        // the last, which holds the remainder. This is what catches a truncated page early enough to
+        // retry it. It is a minimum, not an exact count, because the real API repeats the previous
+        // page's last record at the top of every even page, so those pages hold pageSize + 1 rows.
+        // Repeats are dealt with across pages, in PaginatedInventorySource.
+        var minimumCount = (int)Math.Clamp(totalRecords - ((long)page - 1) * pageSize, 0, pageSize);
+        if (records.Count < minimumCount)
         {
-            return Invalid($"expected {expectedCount} records on this page but received {records.Count}");
+            return Invalid($"expected at least {minimumCount} records on this page but received {records.Count}");
         }
 
         var validRecords = new List<InventoryRecord>(records.Count);
-        var idsOnPage = new HashSet<int>();
         foreach (var recordDto in records)
         {
             var (record, problem) = ToRecord(recordDto);
             if (record is null)
             {
                 return Invalid(problem!);
-            }
-
-            if (!idsOnPage.Add(record.Id))
-            {
-                return Invalid($"record {record.Id} appears more than once on the page");
             }
 
             validRecords.Add(record);

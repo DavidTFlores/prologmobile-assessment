@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -85,6 +86,57 @@ public class InventorySummaryEndpointTests
     }
 
     [Fact]
+    public async Task Counts_each_record_once_when_pages_overlap_the_way_the_real_api_does()
+    {
+        // Five in-stock records at 10.00 each, two per page. Like the real API, the stub repeats the
+        // previous page's last record at the top of every even page, so seven rows arrive for five
+        // records. Counting rows instead of records would report 6 items worth 80.
+        List<InventoryRecord> dataset =
+        [
+            Record(1, category: "Tools", price: 10m, quantity: 1),
+            Record(2, category: "Tools", price: 10m, quantity: 2),
+            Record(3, category: "Tools", price: 10m, quantity: 1),
+            Record(4, category: "Tools", price: 10m, quantity: 1),
+            Record(5, category: "Tools", price: 10m, quantity: 1),
+        ];
+        var upstream = new StubHttpHandler().ThenAlways(UpstreamJson.ServingLikeTheRealApi(dataset));
+        using var app = new InventoryApp(upstream);
+
+        var response = await app.CreateClient().GetAsync(Route);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await ReadJsonAsync(response);
+        var tools = body["categories"]![0]!;
+        Assert.Equal(60m, tools["totalInventoryValue"]!.GetValue<decimal>());
+        Assert.Equal(5, tools["availableRecordCount"]!.GetValue<int>());
+        Assert.Equal([1, 2, 3, 4, 5], tools["items"]!.AsArray().Select(item => item!["id"]!.GetValue<int>()));
+        Assert.Equal(5, body["recordCounts"]!["retrieved"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task Waits_out_a_rate_limit_and_then_finishes_the_read()
+    {
+        // The real API allows 5 requests per 10 seconds and answers the next with a 429 and a
+        // Retry-After. Reading every page takes more requests than that, so this happens on every run.
+        // Retry-After is whole seconds, so one second is the shortest real wait this can exercise.
+        var upstream = new StubHttpHandler()
+            .Then(UpstreamJson.Serving(Dataset))
+            .Then(HttpStatusCode.TooManyRequests, r => r.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(1)))
+            .ThenAlways(UpstreamJson.Serving(Dataset));
+        using var app = new InventoryApp(upstream);
+        var client = app.CreateClient();
+
+        var stopwatch = Stopwatch.StartNew();
+        var response = await client.GetAsync(Route);
+        stopwatch.Stop();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(3, (await ReadJsonAsync(response))["recordCounts"]!["retrieved"]!.GetValue<int>());
+        Assert.Equal(3, upstream.Requests.Count);
+        Assert.True(stopwatch.Elapsed >= TimeSpan.FromSeconds(1), $"Retried after only {stopwatch.Elapsed}.");
+    }
+
+    [Fact]
     public async Task Reads_every_page_and_authenticates_each_request()
     {
         var upstream = new StubHttpHandler().ThenAlways(UpstreamJson.Serving(Dataset));
@@ -166,7 +218,8 @@ public class InventorySummaryEndpointTests
     [Fact]
     public async Task Returns_502_when_the_pages_do_not_add_up_to_a_consistent_dataset()
     {
-        // Both pages are individually valid, but page 2 repeats record 1002 where 1003 should be.
+        // Both pages are individually valid, but page 2 repeats record 1002 where 1003 should be, so
+        // only two of the three records the API says exist ever arrive.
         var upstream = new StubHttpHandler()
             .ThenJson(UpstreamJson.Page(Dataset.Take(2), page: 1, pageSize: 2, totalRecords: 3))
             .ThenJson(UpstreamJson.Page(Dataset.Skip(1).Take(1), page: 2, pageSize: 2, totalRecords: 3));
@@ -175,7 +228,7 @@ public class InventorySummaryEndpointTests
         var response = await app.CreateClient().GetAsync(Route);
 
         var problem = await AssertProblemAsync(response, HttpStatusCode.BadGateway, "InvalidData");
-        Assert.Contains("record 1002 was returned on both page 1 and page 2", problem["detail"]!.GetValue<string>());
+        Assert.Contains("the API reports 3 records but 2 distinct records were returned", problem["detail"]!.GetValue<string>());
     }
 
     [Fact]

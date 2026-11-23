@@ -288,12 +288,10 @@ public class InventoryPageClientTests
             { "no records array", """{"page":1,"pageSize":2,"totalPages":1,"totalRecords":2}""", "missing" },
             { "a different page than requested", Envelope($"{one},{two}", "\"page\":2,\"pageSize\":2,\"totalPages\":1,\"totalRecords\":2"), "asked for page 1" },
             { "a different page size than requested", Envelope($"{one},{two}", "\"page\":1,\"pageSize\":20,\"totalPages\":1,\"totalRecords\":2"), "asked for pageSize 2" },
-            { "fewer records than the metadata promises", Envelope(one), "expected 2 records on this page but received 1" },
-            { "more records than the metadata allows", Envelope($"{one},{two},{two.Replace("\"id\":2", "\"id\":3")}"), "expected 2 records on this page but received 3" },
-            { "an empty page that should be full", Envelope(""), "expected 2 records on this page but received 0" },
+            { "fewer records than the metadata promises", Envelope(one), "expected at least 2 records on this page but received 1" },
+            { "an empty page that should be full", Envelope(""), "expected at least 2 records on this page but received 0" },
             { "totalPages that contradicts totalRecords", Envelope($"{one},{two}", "\"page\":1,\"pageSize\":2,\"totalPages\":5,\"totalRecords\":2"), "totalPages is 5" },
             { "a negative totalRecords", Envelope("", "\"page\":1,\"pageSize\":2,\"totalPages\":0,\"totalRecords\":-1"), "totalRecords is -1" },
-            { "the same id twice on one page", Envelope($"{one},{one}"), "record 1 appears more than once" },
             { "a null entry in records", WithRecord("null"), "a record has no id" },
             { "a record without an id", WithRecord("""{"name":"B","category":"Tools","price":10,"quantity":1,"lastUpdated":"2026-10-15T12:30:00Z"}"""), "a record has no id" },
             { "a record without a quantity", WithRecord("""{"id":2,"name":"B","category":"Tools","price":10,"lastUpdated":"2026-10-15T12:30:00Z"}"""), "record 2 is missing quantity" },
@@ -303,6 +301,35 @@ public class InventoryPageClientTests
             { "a fractional quantity", WithRecord("""{"id":2,"name":"B","category":"Tools","price":10,"quantity":1.5,"lastUpdated":"2026-10-15T12:30:00Z"}"""), "could not be read" },
             { "a timestamp that is not a date", WithRecord("""{"id":2,"name":"B","category":"Tools","price":10,"quantity":1,"lastUpdated":"yesterday"}"""), "could not be read" },
         };
+    }
+
+    [Fact]
+    public async Task Accepts_a_page_that_carries_more_rows_than_the_page_size()
+    {
+        // What the real API does on every even page: the previous page's last record comes first, so a
+        // page of two holds three rows. That is not a reason to reject the page; the repeat is removed
+        // when the pages are combined.
+        var pageTwo = UpstreamJson.Page([Record(2), Record(3), Record(4)], page: 2, pageSize: 2, totalRecords: 5);
+        var handler = new StubHttpHandler().ThenJson(pageTwo);
+
+        var result = await CreateClient(handler).GetPageAsync(new PageRequest(Page: 2, PageSize: 2), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal([2, 3, 4], result.Value.Records.Select(r => r.Id));
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Accepts_an_empty_page_past_the_end_of_the_dataset()
+    {
+        // The real API answers a page beyond the last with a 200 and no records, not a 400.
+        var pastTheEnd = UpstreamJson.Page([], page: 9, pageSize: 2, totalRecords: 5);
+        var handler = new StubHttpHandler().ThenJson(pastTheEnd);
+
+        var result = await CreateClient(handler).GetPageAsync(new PageRequest(Page: 9, PageSize: 2), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(result.Value.Records);
     }
 
     [Fact]

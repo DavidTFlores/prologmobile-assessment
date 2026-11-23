@@ -35,18 +35,24 @@ public class RetryBackoffTests
     }
 
     [Fact]
-    public void A_longer_Retry_After_overrides_the_backoff()
+    public void Retry_After_is_waited_out_in_full_with_the_backoff_added_on_top()
     {
-        var delay = RetryBackoff.Delay(failedAttempt: 1, Base, Max, jitter: 0.5, retryAfter: TimeSpan.FromSeconds(30));
+        // Attempt 1 at jitter 0.5 is a 0.75 s backoff. The API's real Retry-After is 10 s.
+        var delay = RetryBackoff.Delay(failedAttempt: 1, Base, Max, jitter: 0.5, retryAfter: TimeSpan.FromSeconds(10));
 
-        Assert.Equal(TimeSpan.FromSeconds(30), delay);
+        Assert.Equal(TimeSpan.FromSeconds(10.75), delay);
     }
 
-    [Fact]
-    public void A_shorter_Retry_After_never_shortens_the_backoff()
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(0.5)]
+    [InlineData(TopOfJitter)]
+    public void Never_retries_sooner_than_Retry_After_asks_whatever_the_jitter(double jitter)
     {
-        var delay = RetryBackoff.Delay(failedAttempt: 3, Base, Max, jitter: 0.5, retryAfter: TimeSpan.FromMilliseconds(10));
+        var retryAfter = TimeSpan.FromSeconds(10);
 
-        Assert.Equal(TimeSpan.FromSeconds(3), delay);
+        var delay = RetryBackoff.Delay(failedAttempt: 1, Base, Max, jitter, retryAfter);
+
+        Assert.True(delay > retryAfter);
     }
 }
