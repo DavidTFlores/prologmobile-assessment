@@ -23,9 +23,18 @@ public sealed class FetchResult<T>
     [MemberNotNullWhen(false, nameof(Failure))]
     public bool IsSuccess => Failure is null;
 
-    public static FetchResult<T> Success(T value) => new(value, null);
+    public static FetchResult<T> Success(T value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return new FetchResult<T>(value, null);
+    }
 
-    public static implicit operator FetchResult<T>(FetchFailure failure) => new(default, failure);
+    /// <summary>Lets a method whose return type is a result simply <c>return failure;</c>.</summary>
+    public static implicit operator FetchResult<T>(FetchFailure failure)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+        return new FetchResult<T>(default, failure);
+    }
 }
 
 /// <param name="Kind">What went wrong, in terms a caller can act on.</param>

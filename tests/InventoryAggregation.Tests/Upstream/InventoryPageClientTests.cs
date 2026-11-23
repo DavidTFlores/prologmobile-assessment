@@ -282,6 +282,7 @@ public class InventoryPageClientTests
         {
             { "an HTML error page served with a 200", "<html><body>Service unavailable</body></html>", "could not be read" },
             { "a body cut off mid-stream", """{"records":[{"id":1,"name":"A","categ""", "could not be read" },
+            { "an empty body", "", "could not be read" },
             { "a JSON null", "null", "missing" },
             { "no paging metadata", """{"records":[]}""", "missing" },
             { "no records array", """{"page":1,"pageSize":2,"totalPages":1,"totalRecords":2}""", "missing" },
