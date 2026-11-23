@@ -7,4 +7,6 @@ internal static class TestTasks
     /// what a missed fake-clock timer would otherwise look like.
     /// </summary>
     public static Task<T> OrTimeout<T>(this Task<T> task) => task.WaitAsync(TimeSpan.FromSeconds(10));
+
+    public static Task OrTimeout(this Task task) => task.WaitAsync(TimeSpan.FromSeconds(10));
 }
