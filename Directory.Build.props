@@ -1,0 +1,15 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Nullable warnings are bugs in this codebase, so they fail the build. Everything else stays a
+         warning on purpose: a reviewer's newer SDK (new analyzers, NuGet audit advisories) must not be
+         able to break a clean clone. -->
+    <WarningsAsErrors>nullable</WarningsAsErrors>
+
+    <!-- Lets the app and the tests start on a newer runtime when .NET 8 itself is not installed. -->
+    <RollForward>Major</RollForward>
+  </PropertyGroup>
+</Project>
