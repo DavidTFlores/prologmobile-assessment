@@ -11,11 +11,11 @@ public sealed class InventoryApiOptions : IValidatableObject
     public const string SectionName = "InventoryApi";
 
     /// <summary>Root of the Inventory API, for example https://host/. Supplied outside source control.</summary>
-    [Required]
+    [Required(ErrorMessage = "InventoryApi:BaseUrl is not set. Use user secrets or the InventoryApi__BaseUrl environment variable (see README).")]
     public string BaseUrl { get; set; } = "";
 
     /// <summary>Never committed: comes from user secrets or an environment variable.</summary>
-    [Required]
+    [Required(ErrorMessage = "InventoryApi:ApiKey is not set. Use user secrets or the InventoryApi__ApiKey environment variable (see README).")]
     public string ApiKey { get; set; } = "";
 
     /// <summary>The request header the key is sent in.</summary>
