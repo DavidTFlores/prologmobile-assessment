@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
 
@@ -9,7 +9,7 @@
          able to break a clean clone. -->
     <WarningsAsErrors>nullable</WarningsAsErrors>
 
-    <!-- Lets the app and the tests start on a newer runtime when .NET 8 itself is not installed. -->
+    <!-- Lets the app and the tests start on a newer runtime when .NET 10 itself is not installed. -->
     <RollForward>Major</RollForward>
   </PropertyGroup>
 </Project>
